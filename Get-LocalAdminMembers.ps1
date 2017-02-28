@@ -1,26 +1,48 @@
-﻿$cn = new-object System.Data.SqlClient.SqlConnection("Data Source=WS12SQL;Integrated Security=SSPI;Initial Catalog=ServerAnalysis");
+$server = "SERVER1"
+$instance = "Default"
+$database = "_dbaid"
+$tableSchema = "dbo"
+$tableName = "localhost_administrators"
 
 Import-Module ActiveDirectory
+[System.Reflection.Assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo") | Out-Null
 
-$localAdmins = $([ADSI]("WinNT://$env:computername/Administrators,group")).Members() | 
-        ForEach  { $_.GetType().InvokeMember("Adspath", "GetProperty", $null, $_, $null).Split("/")[-2] +
-            "," + 
-            $_.GetType().InvokeMember("Adspath", "GetProperty", $null, $_, $null).Split("/")[-1] + 
-            "," + 
-            $_.GetType().InvokeMember("Class", "GetProperty", $null, $_, $null) } | 
-        ConvertFrom-Csv -Header $("Domain","Name","Class");
+$smoServer = New-Object -TypeName Microsoft.SqlServer.Management.Smo.Server -ArgumentList "$server\$instance"
+$smoDatabase = New-Object -TypeName Microsoft.SqlServer.Management.Smo.Database
+$smoDatabase = $smoServer.Databases.Item($database)
+$smoTable = $smoDatabase.tables | where-object { $_.Schema -eq $tableSchema -and $_.Name -eq $tableName } 
 
-$dt = new-object Data.datatable;
-$dt.Columns.Add("sid") | out-null
-$dt.Columns.Add("name") | out-null
-$dt.Columns.Add("source") | out-null
+if ($smoTable -eq $null)
+{
+    $smoTable = New-Object('Microsoft.SqlServer.Management.Smo.Table') $smoDatabase, $tableName, $tableSchema
 
-foreach ($account in $LocalAdmins) 
+    #Add various columns to the table.   
+    $Type = [Microsoft.SqlServer.Management.Smo.DataType]::varchar(128)
+    $col1 =  New-Object -TypeName Microsoft.SqlServer.Management.Smo.Column -argumentlist $smoTable,"server", $Type
+    $col2 =  New-Object -TypeName Microsoft.SqlServer.Management.Smo.Column -argumentlist $smoTable,"sid", $Type
+    $col3 =  New-Object -TypeName Microsoft.SqlServer.Management.Smo.Column -argumentlist $smoTable,"account", $Type  
+    $col4 =  New-Object -TypeName Microsoft.SqlServer.Management.Smo.Column -argumentlist $smoTable,"source", $Type  
+    $smoTable.Columns.Add($col1)
+    $smoTable.Columns.Add($col2)
+    $smoTable.Columns.Add($col3)
+    $smoTable.Columns.Add($col4)
+    $smoTable.Create()
+}
+else
+{
+    $smoDatabase.ExecuteNonQuery("DELETE FROM [$tableSchema].[$tableName];")
+}
+
+$localAdmins = $([ADSI]("WinNT://$server/Administrators,group")).Members() | ForEach  { $_.GetType().InvokeMember("Adspath", "GetProperty", $null, $_, $null).Split("/")[-2] +
+            "," + $_.GetType().InvokeMember("Adspath", "GetProperty", $null, $_, $null).Split("/")[-1] + "," + $_.GetType().InvokeMember("Class", "GetProperty", $null, $_, $null) } | 
+            ConvertFrom-Csv -Header $("Domain","Name","Class")
+
+foreach ($account in $LocalAdmins)
 {
     if ($account.Class -eq "User" -and $account.Domain -ne $env:computername)
     {
         $member = Get-ADUser -Identity $account.Name -Properties * | Select SID, UserPrincipalName, @{Name="Source";Expression={$account.Domain}}
-        $dt.Rows.Add($member.SID, $member.UserPrincipalName, $member.Source) | out-null
+        $smoDatabase.ExecuteNonQuery("INSERT INTO [$tableSchema].[$tableName] VALUES('$server','$($member.SID)','$($member.UserPrincipalName)','$($member.Source)')")
     }
     if ($account.Class -eq "Group" -and $account.Domain -ne $env:computername)
     {
@@ -28,17 +50,12 @@ foreach ($account in $LocalAdmins)
 
         foreach ($member in $members)
         {
-            $dt.Rows.Add($member.SID, $member.UserPrincipalName, $member.Source) | out-null
+            $smoDatabase.ExecuteNonQuery("INSERT INTO [$tableSchema].[$tableName] VALUES('$server','$($member.SID)','$($member.UserPrincipalName)','$($member.Source)')")
         }
     }
     if ($account.Domain -eq $env:computername)
     {
-        $dt.Rows.Add($(New-Object System.Security.Principal.NTAccount($account.Name)).Translate([System.Security.Principal.SecurityIdentifier]).Value, $account.Name, $account.Domain) | out-null
+        $sid = $(New-Object System.Security.Principal.NTAccount($account.Name)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+        $smoDatabase.ExecuteNonQuery("INSERT INTO [$tableSchema].[$tableName] VALUES('$server','$sid','$($account.Name)','$($account.Domain)')")
     }
 }
-
-$cn.Open()
-$bc = new-object ("System.Data.SqlClient.SqlBulkCopy") $cn
-$bc.DestinationTableName = "dbo.LogicalDisk"
-$bc.WriteToServer($dt)
-$cn.Close()
