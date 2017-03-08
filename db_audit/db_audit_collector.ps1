@@ -1,7 +1,7 @@
 Import-Module SqlPs
 
 [array]$SourceServers = get-content "C:\Datacom\db_audit\servers.txt"
-[string]$sql = get-content "C:\Datacom\db_audit\db_last_access.sql"
+[string]$sql = get-content "C:\Datacom\db_audit\db_audit_last_access.sql"
 
 [string]$DestinationConnectionString = "Data Source=PSVMMAP01\MAPS;Initial Catalog=wayne_db_audit;Integrated Security=True"
 [string]$DestinationTableName = "last_user_access_staging"
