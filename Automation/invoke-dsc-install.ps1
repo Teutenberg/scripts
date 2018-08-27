@@ -1,7 +1,7 @@
 <# USER PARAMETERS #>
 [string]$SQLSetupPath          = 'C:\Setup\sqlsetup\mssql2017'
 [string]$SQLUpdatePath         = 'C:\Setup\sqlsetup\mssql2017'
-[string]$SQLInstanceName       = 'TEST3'
+[string]$SQLInstanceName       = 'TEST5'
 [string]$SQLCollation          = 'Latin1_General_CI_AS'
 [string[]]$SQLSysAdminAccounts = 'demo\waynet'
 [string]$SQLDataDrive          = 'E:\'
@@ -13,7 +13,7 @@
 [string]$DBAidSetupPath        = 'C:\Setup\dbaid'
 [string]$CheckMkPackage        = 'C:\Setup\checkmk\check-mk-agent-1.2.4p5.exe'
 
-<# AUTO PARAMETERS #>
+#region: INSTALL SQLSERVER #
 $SQLMajorVersion = (Get-Item -Path $(Join-Path $SQLSetupPath 'setup.exe')).VersionInfo.ProductVersion.Split('.')[0]
 $BrowserSvcStartupType = if ($SQLInstanceName -eq 'MSSQLSERVER') { 'Disabled' } else { 'Automatic' }
 
@@ -38,6 +38,21 @@ $sqlSetupParams = @{
     BrowserSvcStartupType = $BrowserSvcStartupType
 }
 
+if ($SQLSetupPath) {
+    $testSqlSetup = Invoke-DscResource -ModuleName @{ModuleName='SqlServerDsc'; ModuleVersion='11.4.0.0'} -Name SqlSetup -Property $sqlSetupParams -Method Test
+
+    if (!$testSqlSetup) {
+        Write-Host 'Installing(SqlSetup)...' -BackgroundColor White -ForegroundColor Black
+        Invoke-DscResource -ModuleName @{ModuleName='SqlServerDsc'; ModuleVersion='11.4.0.0'} -Name SqlSetup -Property $sqlSetupParams -Method Set -Verbose
+    } else {
+        Write-Host 'Skipping(SqlSetup)... SQL Instance already exists.' -BackgroundColor Yellow -ForegroundColor Black
+    } 
+} else {
+    Write-Host 'Skipping(SqlSetup)... No setup path provided.' -BackgroundColor Yellow -ForegroundColor Black
+}
+#endregion
+
+#region: INSTALL SSMS #
 $SSMSParams = @{
     Name      = 'SSMS-Setup-ENU'
     Ensure    = 'Present'
@@ -46,47 +61,68 @@ $SSMSParams = @{
     ProductId = $SSMSProductId
 }
 
-$checkmkParams = @{
-    Name      = 'Check_MK Agent 1.2.4p5'
-    Ensure    = 'Present'
-    Path      = $CheckMkPackage
-    Arguments = '/S'
-    ProductId = ''
-}
-
-
-<# INSTALL SQLSERVER #>
-if ($SQLSetupPath) {
-    $testSqlSetup = Invoke-DscResource -ModuleName @{ModuleName='SqlServerDsc'; ModuleVersion='11.4.0.0'} -Name SqlSetup -Property $sqlSetupParams -Method Test
-
-    if (!$testSqlSetup) {
-        $setSqlSetup = Invoke-DscResource -ModuleName @{ModuleName='SqlServerDsc'; ModuleVersion='11.4.0.0'} -Name SqlSetup -Property $sqlSetupParams -Method Set
-    }
-    
-    Write-Host 'GET: SQL Server DSC' -BackgroundColor White -ForegroundColor Black
-    Invoke-DscResource -ModuleName @{ModuleName='SqlServerDsc'; ModuleVersion='11.4.0.0'} -Name SqlSetup -Property $sqlSetupParams -Method Get
-}
-
-<# INSTALL SSMS #>
 if ($SSMSPackage) {
     $testSSMS = Invoke-DscResource -ModuleName @{ModuleName='PSDesiredStateConfiguration'; ModuleVersion='1.1'} -Name Package -Property $SSMSParams -Method Test
 
     if (!$testSSMS) {
-        $setSSMS = Invoke-DscResource -ModuleName @{ModuleName='PSDesiredStateConfiguration'; ModuleVersion='1.1'} -Name Package -Property $SSMSParams -Method Set
+        Write-Host 'Installing(SSMS)...' -BackgroundColor White -ForegroundColor Black
+        Invoke-DscResource -ModuleName @{ModuleName='PSDesiredStateConfiguration'; ModuleVersion='1.1'} -Name Package -Property $SSMSParams -Method Set -Verbose
+    } else {
+        Write-Host 'Skipping(SSMS)... Package already installed.' -BackgroundColor Yellow -ForegroundColor Black
     }
-
-    Write-Host 'GET: SSMS DSC' -BackgroundColor White -ForegroundColor Black
-    Invoke-DscResource -ModuleName @{ModuleName='PSDesiredStateConfiguration'; ModuleVersion='1.1'} -Name Package -Property $SSMSParams -Method Get
+} else {
+    Write-Host 'Skipping(SSMS)... No package provided.' -BackgroundColor Yellow -ForegroundColor Black
 }
+#endregion
 
-<# INSTALL CHECKMK #>
+#region: INSTALL CHECKMK #
 if ($CheckMkPackage) {
-    $testCheckmk = Invoke-DscResource -ModuleName @{ModuleName='PSDesiredStateConfiguration'; ModuleVersion='1.1'} -Name Package -Property $checkmkParams -Method Test
+    $iService = (Get-WmiObject win32_service | ?{$_.Name -like 'Check_MK_Agent'}).PathName
+    $installCheckMk = $true
 
-    if (!$testCheckmk) {
-        $setCheckmk = Invoke-DscResource -ModuleName @{ModuleName='PSDesiredStateConfiguration'; ModuleVersion='1.1'} -Name Package -Property $checkmkParams -Method Set
+    if ($iService) {
+        $iVersion = ([string](.$iService version)).Replace('Check_MK_Agent version ','')
+        $pVersion = (Split-Path $CheckMkPackage -Leaf).Replace('check-mk-agent-','').Replace('.exe','')
+
+        if ($iVersion -eq $pVersion) {
+            $installCheckMk = $false
+        }
     }
 
-    Write-Host 'GET: CheckMk DSC' -BackgroundColor White -ForegroundColor Black
-    Invoke-DscResource -ModuleName @{ModuleName='PSDesiredStateConfiguration'; ModuleVersion='1.1'} -Name Package -Property $checkmkParams -Method Get
+    if ($installCheckMk) {
+        Write-Host 'Installing CheckMk...' -BackgroundColor White -ForegroundColor Black
+        Start-Process -Wait -FilePath $CheckMkPackage -ArgumentList "/S" -PassThru
+    } else {
+        Write-Host 'Skipping(CheckMk)... Package already installed.' -BackgroundColor Yellow -ForegroundColor Black
+    }
+} else {
+    Write-Host 'Skipping(CheckMk). No package provided.' -BackgroundColor Yellow -ForegroundColor Black
 }
+#endregion
+
+#region: INSTALL DBAID #
+if ($DBAidSetupPath) {
+    
+    # Create database if not exists
+    $testCreateDBAid = Invoke-Sqlcmd -ServerInstance (Join-Path $env:COMPUTERNAME $SQLInstanceName) -Query "SELECT [name] FROM sys.databases WHERE [name] = N'_dbaid'"
+
+    if (!$testCreateDBAid) {
+        Write-Host 'Creating DBAid database...' -BackgroundColor White -ForegroundColor Black
+        Invoke-Sqlcmd -ServerInstance (Join-Path $env:COMPUTERNAME $SQLInstanceName) -InputFile (Join-Path $DBAidSetupPath 'dbaid_release_create.sql') -OutputSqlErrors $true -Verbose
+    } else {
+        Write-Host 'Skipping(DBAid)... Database already exists.' -BackgroundColor Yellow -ForegroundColor Black
+    }
+
+    # Copy over DBAid executables if not exist 
+    ROBOCOPY "$DBAidSetupPath" "C:\Datacom\DBAid" /copy:DAT /dcopy:DAT /MT /xo /r:10 /w:5 /xf "dbaid.checkmk.*" | Out-Null
+
+    # Copy over DBAid checkmk plug-in if not exist 
+    $CheckMkLocal = Join-Path (Split-Path (Get-WmiObject win32_service | ?{$_.Name -like 'Check_MK_Agent'}).PathName -Parent) 'local'
+    if ($CheckMkLocal) {
+        ROBOCOPY "$DBAidSetupPath" "$CheckMkLocal" "dbaid.checkmk.*" /e /copy:DAT /dcopy:DAT /MT /xo /r:10 /w:5 | Out-Null
+    }
+
+} else {
+    Write-Host 'Skipping(DBAid)... No setup path provided.' -BackgroundColor Yellow -ForegroundColor Black
+}
+#endregion
