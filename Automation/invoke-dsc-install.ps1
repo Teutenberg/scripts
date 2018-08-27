@@ -1,4 +1,5 @@
 <# USER PARAMETERS #>
+
 [string]$SQLSetupPath          = 'C:\Setup\sqlsetup\mssql2017'
 [string]$SQLUpdatePath         = 'C:\Setup\sqlsetup\mssql2017'
 [string]$SQLInstanceName       = 'TEST5'
@@ -12,6 +13,9 @@
 [string]$SSMSProductId         = '945B6BB0-4D19-4E0F-AE57-B2D94DA32313'
 [string]$DBAidSetupPath        = 'C:\Setup\dbaid'
 [string]$CheckMkPackage        = 'C:\Setup\checkmk\check-mk-agent-1.2.4p5.exe'
+
+<# AUTO PARAMETERS #>
+[string]$ServerInstance = (Join-Path $env:COMPUTERNAME $SQLInstanceName)
 
 #region: INSTALL SQLSERVER #
 $SQLMajorVersion = (Get-Item -Path $(Join-Path $SQLSetupPath 'setup.exe')).VersionInfo.ProductVersion.Split('.')[0]
@@ -104,22 +108,47 @@ if ($CheckMkPackage) {
 if ($DBAidSetupPath) {
     
     # Create database if not exists
-    $testCreateDBAid = Invoke-Sqlcmd -ServerInstance (Join-Path $env:COMPUTERNAME $SQLInstanceName) -Query "SELECT [name] FROM sys.databases WHERE [name] = N'_dbaid'"
+    $testCreateDBAid = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query "SELECT [name] FROM sys.databases WHERE [name] = N'_dbaid'"
 
     if (!$testCreateDBAid) {
         Write-Host 'Creating DBAid database...' -BackgroundColor White -ForegroundColor Black
-        Invoke-Sqlcmd -ServerInstance (Join-Path $env:COMPUTERNAME $SQLInstanceName) -InputFile (Join-Path $DBAidSetupPath 'dbaid_release_create.sql') -OutputSqlErrors $true -Verbose
+        Invoke-Sqlcmd -ServerInstance $ServerInstance -InputFile (Join-Path $DBAidSetupPath 'dbaid_release_create.sql') -OutputSqlErrors $true -Verbose
     } else {
         Write-Host 'Skipping(DBAid)... Database already exists.' -BackgroundColor Yellow -ForegroundColor Black
     }
 
+    Write-Host 'Configuring DBAid executables...' -BackgroundColor White -ForegroundColor Black
     # Copy over DBAid executables if not exist 
     ROBOCOPY "$DBAidSetupPath" "C:\Datacom\DBAid" /copy:DAT /dcopy:DAT /MT /xo /r:10 /w:5 /xf "dbaid.checkmk.*" | Out-Null
+
+    # Add ConnectionString if not exists
+    $Path = "C:\Datacom\DBAid\dbaid.collector.exe.config"
+    $Xml = Get-Content -Path $Path
+
+    if ($Xml.configuration.connectionStrings.add.Name -inotcontains $ServerInstance.Replace('\','@')) {
+        $NewConnection = $Xml.CreateElement("add")
+        $NewConnection.SetAttribute("Name",$ServerInstance.Replace('\','@'));
+        $NewConnection.SetAttribute("connectionString","Server=$ServerInstance;Database=_dbaid;Trusted_Connection=True;");
+        $Xml.configuration.connectionStrings.AppendChild($NewConnection) | Out-Null
+        $Xml.Save($Path)
+    }
 
     # Copy over DBAid checkmk plug-in if not exist 
     $CheckMkLocal = Join-Path (Split-Path (Get-WmiObject win32_service | ?{$_.Name -like 'Check_MK_Agent'}).PathName -Parent) 'local'
     if ($CheckMkLocal) {
         ROBOCOPY "$DBAidSetupPath" "$CheckMkLocal" "dbaid.checkmk.*" /e /copy:DAT /dcopy:DAT /MT /xo /r:10 /w:5 | Out-Null
+
+        # Add ConnectionString if not exists
+        $Path = "$CheckMkLocal\dbaid.checkmk.exe.config"
+        $Xml = Get-Content -Path $Path
+
+        if ($Xml.configuration.connectionStrings.add.Name -inotcontains $ServerInstance.Replace('\','@')) {
+            $NewConnection = $Xml.CreateElement("add")
+            $NewConnection.SetAttribute("Name",$ServerInstance.Replace('\','@'));
+            $NewConnection.SetAttribute("connectionString","Server=$ServerInstance;Database=_dbaid;Trusted_Connection=True;");
+            $Xml.configuration.connectionStrings.AppendChild($NewConnection) | Out-Null
+            $Xml.Save($Path)
+        }
     }
 
 } else {
