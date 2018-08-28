@@ -1,14 +1,17 @@
-<# USER PARAMETERS #>
+<# SQL PARAMETERS #>
 
 [string]$SQLSetupPath          = 'C:\Setup\sqlsetup\mssql2017'
 [string]$SQLUpdatePath         = 'C:\Setup\sqlsetup\mssql2017'
-[string]$SQLInstanceName       = 'TEST5'
+[string]$SQLInstanceName       = 'TEST6'
 [string]$SQLCollation          = 'Latin1_General_CI_AS'
 [string[]]$SQLSysAdminAccounts = 'demo\waynet'
+[string]$SQLInstanceDrive      = 'E:\'
 [string]$SQLDataDrive          = 'E:\'
 [string]$SQLLogDrive           = 'F:\'
 [string]$SQLTempdbDrive        = 'G:\'
 [string]$SQLBackupDrive        = 'G:\'
+
+<# PACKAGE PARAMETERS #>
 [string]$SSMSPackage           = 'C:\Setup\sqlsetup\SSMS-Setup-ENU.exe'
 [string]$SSMSProductId         = '945B6BB0-4D19-4E0F-AE57-B2D94DA32313'
 [string]$DBAidSetupPath        = 'C:\Setup\dbaid'
@@ -30,7 +33,7 @@ $sqlSetupParams = @{
     InstallSharedDir      = 'C:\Program Files\Microsoft SQL Server'
     InstallSharedWOWDir   = 'C:\Program Files (x86)\Microsoft SQL Server'
     InstanceDir           = 'C:\Program Files\Microsoft SQL Server'
-    InstallSQLDataDir     = ($SQLDataDrive + '\')
+    InstallSQLDataDir     = ($SQLInstanceDrive + '\')
     SQLUserDBDir          = (Join-Path $SQLDataDrive "MSSQL$SQLMajorVersion.$SQLInstanceName\MSSQL\DATA")
     SQLUserDBLogDir       = (Join-Path $SQLLogDrive  "MSSQL$SQLMajorVersion.$SQLInstanceName\MSSQL\DATA")
     SQLTempDBDir          = (Join-Path $SQLTempdbDrive "MSSQL$SQLMajorVersion.$SQLInstanceName\MSSQL\DATA")
