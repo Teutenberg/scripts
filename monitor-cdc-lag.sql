@@ -29,10 +29,9 @@ FROM fn_dblog(@LSN_HEX, NULL) [log]
 WHERE [log].[Operation] IN (N'LOP_INSERT_ROWS', N'LOP_COMMIT_XACT')
 )
 SELECT [a].[object_name]
-	,[log_commit_time] = MAX([b].[commit_time])
-	,[cdc_last_commit_lsn] = [cdc].[last_commit_lsn]
+	,[log_last_commit_time] = MAX([b].[commit_time])
 	,[cdc_last_commit_time] = MAX([cdc].[last_commit_time])
-	,[cdc_scan_lag_min] = MAX(DATEDIFF(MINUTE, [cdc].[last_commit_time], [b].[commit_time]))
+	,[cdc_scan_lag_min] = DATEDIFF(MINUTE, MAX([cdc].[last_commit_time]), GETDATE())
 	,[cdc_pending_commands] = COUNT(*)
 FROM LogData [a]
 	INNER JOIN LogData [b]
@@ -43,4 +42,3 @@ FROM LogData [a]
 	CROSS APPLY (SELECT [last_commit_lsn], [last_commit_time] FROM sys.dm_cdc_log_scan_sessions WHERE [session_id] = 0) [cdc]
 WHERE [a].[object_tracked_by_cdc] = 1
 GROUP BY [a].[object_name]
-	,[cdc].[last_commit_lsn]
