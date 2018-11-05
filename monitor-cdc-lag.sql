@@ -1,9 +1,11 @@
 SET NOCOUNT ON
-DECLARE @LSN NVARCHAR(46), @LSN_HEX NVARCHAR(25);
-SELECT TOP 1 @LSN = [last_commit_lsn] FROM sys.dm_cdc_log_scan_sessions WHERE [session_id] = 0;
-SELECT @LSN_HEX = CAST(CAST(CONVERT(VARBINARY, SUBSTRING(@LSN, 1, 8), 2) AS INT) AS VARCHAR)
-	+ ':' + CAST(CAST(CONVERT(VARBINARY, SUBSTRING(@LSN, 10, 8), 2) AS INT) AS VARCHAR)
-	+ ':' + CAST(CAST(CONVERT(VARBINARY, SUBSTRING(@LSN, 19, 4), 2) AS INT) AS VARCHAR);
+DECLARE @LSN NVARCHAR(23), @LSN_HEX NVARCHAR(25), @l1 INT, @l2 INT, @l3 INT;
+
+SELECT TOP 1 @LSN = REVERSE(REPLACE(REVERSE([last_commit_lsn]), CHAR(0), '')) FROM sys.dm_cdc_log_scan_sessions WHERE [session_id] = 0;
+SELECT @l1 = CHARINDEX(':', @LSN, 0), @l2 = CHARINDEX(':', @LSN, @l1), @l3 = LEN(@LSN)-@l2-@l1
+SELECT @LSN_HEX = CAST(CAST(CONVERT(VARBINARY, SUBSTRING(@LSN, 1, @l1-1), 2) AS INT) AS VARCHAR)
+	+ ':' + CAST(CAST(CONVERT(VARBINARY, SUBSTRING(@LSN, @l1+1, @l2-1), 2) AS INT) AS VARCHAR)
+	+ ':' + CAST(CAST(CONVERT(VARBINARY, SUBSTRING(@LSN, @l1+@l2+1, @l3), 2) AS INT) AS VARCHAR);
 
 ;WITH LogData
 AS
@@ -39,6 +41,6 @@ FROM LogData [a]
 			AND [a].[row] = [b].[row]
 			AND [a].[operation] = N'LOP_INSERT_ROWS'
 			AND [b].[operation] = N'LOP_COMMIT_XACT'
-	CROSS APPLY (SELECT [last_commit_lsn], [last_commit_time] FROM sys.dm_cdc_log_scan_sessions WHERE [session_id] = 0) [cdc]
+	CROSS APPLY (SELECT [last_commit_lsn], [last_commit_time], [latency] FROM sys.dm_cdc_log_scan_sessions WHERE [session_id] = 0) [cdc]
 WHERE [a].[object_tracked_by_cdc] = 1
 GROUP BY [a].[object_name]
