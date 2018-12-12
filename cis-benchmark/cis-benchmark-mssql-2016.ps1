@@ -1,4 +1,4 @@
-[string]$SqlServer = "SETTDMSQLP26\MSSQLSERVER,1433"
+[string]$SqlServer = "SQLSERVERINSTANCE"
 [array]$CisBenchmark = @()
 
 $CisBenchmark += @{
