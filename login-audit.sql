@@ -1,5 +1,4 @@
 SET NOCOUNT ON;
-SET NOCOUNT ON;
 
 SELECT 'SECURITY' AS [heading], 'Principals' AS [subheading], '' AS [comment]
 
@@ -80,7 +79,7 @@ EXEC sp_MSforeachdb 'USE [?];WITH [membership] ([row],[user_id],[role_id],[nest_
 
 SELECT [login].[name] AS [login_name]
 	,ISNULL([login].[type_desc],'DB_ORPHANED') AS [login_type]
-	,STUFF(CAST((SELECT '; ' + [account_name] AS [text()] FROM @login_info WHERE [group_sid]=[login].[sid] FOR XML PATH('')) AS VARCHAR(MAX)), 1, 2, '') AS [group_member]
+	,SUBSTRING(STUFF(CAST((SELECT '; ' + [account_name] AS [text()] FROM @login_info WHERE [group_sid]=[login].[sid] FOR XML PATH('')) AS VARCHAR(MAX)), 1, 2, ''), 0, 32000) AS [group_member]
 	,[login].[is_disabled] AS [is_disabled]
 	,CASE WHEN [login].[type_desc] IN ('WINDOWS_LOGIN','WINDOWS_GROUP') THEN CASE WHEN [invalid].[user_sid] IS NULL THEN '0' ELSE '1' END ELSE NULL END AS [is_ad_orphaned]
 	,STUFF(CAST((SELECT '; ' + SUSER_NAME([role_principal_id]) AS [text()] FROM sys.server_role_members WHERE [member_principal_id]=[login].[principal_id] FOR XML PATH('')) AS VARCHAR(MAX)), 1, 2, '') AS [server_roles]
