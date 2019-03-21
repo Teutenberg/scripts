@@ -1,20 +1,52 @@
 -- YOU MUST EXECUTE THE FOLLOWING SCRIPT IN SQLCMD MODE.
-:SETVAR PRIMARY		"SORBSPSQLQ01\SP2013"
-:SETVAR SECONDARY1 "SORBSPSQLQ02\SP2013"
-:SETVAR SERVICEACCOUNT "BNZNAG\SrvSQLsrvSP01PPTE"
-:SETVAR AGNAME "AG-SP-PPTE"
-:SETVAR DATABASE "AGTest"
+:SETVAR PRIMARY "server\instance"
+:SETVAR SECONDARY1 "server\instance"
+:SETVAR SERVICEACCOUNT "domain\serviceaccount"
+:SETVAR AGNAME "AG-APP-ENV"
+:SETVAR DATABASE "DBNAME"
 
+:on error exit
 :Connect $(PRIMARY)
-
-USE [master]
+USE [master];
 GO
+
+IF NOT EXISTS (SELECT * FROM sys.endpoints e WHERE e.name = N'hadr-endpoint') 
+BEGIN
+	CREATE ENDPOINT [hadr-endpoint] STATE=STARTED AS TCP (LISTENER_PORT = 5022, LISTENER_IP = ALL)
+		FOR DATA_MIRRORING (ROLE = ALL, AUTHENTICATION = WINDOWS NEGOTIATE, ENCRYPTION = REQUIRED ALGORITHM AES);
+END
+
+ALTER ENDPOINT [hadr-endpoint] STATE = STARTED;
 
 IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = N'$(SERVICEACCOUNT)')
 	CREATE LOGIN [$(SERVICEACCOUNT)] FROM WINDOWS WITH DEFAULT_DATABASE=[master];
 
 GRANT CONNECT ON ENDPOINT::[hadr-endpoint] TO [$(SERVICEACCOUNT)];
 GRANT CONNECT SQL TO [$(SERVICEACCOUNT)];
+GO
+
+:Connect $(SECONDARY1)
+USE [master];
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.endpoints e WHERE e.name = N'hadr-endpoint') 
+BEGIN
+	CREATE ENDPOINT [hadr-endpoint] STATE=STARTED AS TCP (LISTENER_PORT = 5022, LISTENER_IP = ALL)
+		FOR DATA_MIRRORING (ROLE = ALL, AUTHENTICATION = WINDOWS NEGOTIATE, ENCRYPTION = REQUIRED ALGORITHM AES);
+END
+
+ALTER ENDPOINT [hadr-endpoint] STATE = STARTED;
+
+IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = N'$(SERVICEACCOUNT)')
+	CREATE LOGIN [$(SERVICEACCOUNT)] FROM WINDOWS WITH DEFAULT_DATABASE=[master];
+
+GRANT CONNECT ON ENDPOINT::[hadr-endpoint] TO [$(SERVICEACCOUNT)];
+GRANT CONNECT SQL TO [$(SERVICEACCOUNT)];
+GO
+
+
+:Connect $(PRIMARY)
+USE [master];
 GO
 
 DECLARE @url_p NVARCHAR(128), @url_s1 NVARCHAR(128), @sql NVARCHAR(MAX);
@@ -51,9 +83,7 @@ BEGIN
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.availability_databases_cluster [db] 
-	INNER JOIN sys.availability_groups [g] ON [db].[group_id] = [g].[group_id] 
-	WHERE [db].[database_name] = N'$(DATABASE)' AND [g].[name] = N'$(AGNAME)')
+IF NOT EXISTS (SELECT * FROM sys.availability_databases_cluster [db] INNER JOIN sys.availability_groups [g] ON [db].[group_id] = [g].[group_id] WHERE [db].[database_name] = N'$(DATABASE)' AND [g].[name] = N'$(AGNAME)')
 BEGIN
 	ALTER AVAILABILITY GROUP [$(AGNAME)] ADD DATABASE [$(DATABASE)];
 	PRINT '[$(PRIMARY)] - Added database [$(DATABASE)] to AG [$(AGNAME)]';
@@ -68,8 +98,8 @@ IF EXISTS (SELECT *
 				INNER JOIN sys.availability_replicas [r] ON [s].replica_id = [r].[replica_id]
 				INNER JOIN sys.availability_groups [ag] ON [s].[group_id] = [ag].[group_id]
 				INNER JOIN sys.databases [db] ON [s].[database_id] = [db].[database_id]
-			WHERE [db].[name] = N'AGTest'
-				AND [ag].[name] = N'AG-SP-PPTE'
+			WHERE [db].[name] = N'$(DATABASE)'
+				AND [ag].[name] = N'$(AGNAME)'
 				AND [s].[synchronization_state] = 0
 				AND [r].[replica_server_name] IN (N'$(PRIMARY)', N'$(SECONDARY1)'))
 BEGIN
@@ -78,6 +108,9 @@ END
 GO
 
 :Connect $(SECONDARY1)
+USE [master];
+GO
+
 IF NOT EXISTS (SELECT * FROM sys.availability_groups WHERE [name] = N'$(AGNAME)')
 BEGIN
 	ALTER AVAILABILITY GROUP [$(AGNAME)] JOIN;
@@ -109,8 +142,8 @@ IF EXISTS (SELECT *
 				INNER JOIN sys.availability_replicas [r] ON [s].replica_id = [r].[replica_id]
 				INNER JOIN sys.availability_groups [ag] ON [s].[group_id] = [ag].[group_id]
 				INNER JOIN sys.databases [db] ON [s].[database_id] = [db].[database_id]
-			WHERE [db].[name] = N'$(DATABASE)'
-				AND [ag].[name] = N'$(AGNAME)'
+			WHERE [db].[name] = N'AGTest'
+				AND [ag].[name] = N'AG-SP-PPTE'
 				AND [s].[synchronization_state] = 0
 				AND [r].[replica_server_name] IN (N'$(PRIMARY)', N'$(SECONDARY1)'))
 BEGIN
