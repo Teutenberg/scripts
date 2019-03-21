@@ -83,13 +83,6 @@ BEGIN
 END
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.availability_databases_cluster [db] INNER JOIN sys.availability_groups [g] ON [db].[group_id] = [g].[group_id] WHERE [db].[database_name] = N'$(DATABASE)' AND [g].[name] = N'$(AGNAME)')
-BEGIN
-	ALTER AVAILABILITY GROUP [$(AGNAME)] ADD DATABASE [$(DATABASE)];
-	PRINT '[$(PRIMARY)] - Added database [$(DATABASE)] to AG [$(AGNAME)]';
-END
-GO
-
 DECLARE @path NVARCHAR(128);
 SET @path = N'\\' + SUBSTRING('$(PRIMARY)',0,CHARINDEX('\', '$(PRIMARY)')) + N'\$(AGNAME)\$(DATABASE).bak';
 
@@ -106,6 +99,14 @@ BEGIN
 	BACKUP DATABASE [$(DATABASE)] TO DISK = @path WITH COPY_ONLY, FORMAT, INIT, SKIP, REWIND, NOUNLOAD, COMPRESSION;
 END
 GO
+		    
+IF NOT EXISTS (SELECT * FROM sys.availability_databases_cluster [db] INNER JOIN sys.availability_groups [g] ON [db].[group_id] = [g].[group_id] WHERE [db].[database_name] = N'$(DATABASE)' AND [g].[name] = N'$(AGNAME)')
+BEGIN
+	ALTER AVAILABILITY GROUP [$(AGNAME)] ADD DATABASE [$(DATABASE)];
+	PRINT '[$(PRIMARY)] - Added database [$(DATABASE)] to AG [$(AGNAME)]';
+END
+GO
+
 
 :Connect $(SECONDARY1)
 USE [master];
