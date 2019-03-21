@@ -117,14 +117,14 @@ GO
 DECLARE @path NVARCHAR(128);
 SET @path = N'\\' + SUBSTRING('$(PRIMARY)',0,CHARINDEX('\', '$(PRIMARY)')) + N'\$(AGNAME)\$(DATABASE).bak';
 
-IF EXISTS (SELECT * 
+IF NOT EXISTS (SELECT * 
 			FROM sys.dm_hadr_database_replica_states [s]
 				INNER JOIN sys.availability_replicas [r] ON [s].replica_id = [r].[replica_id]
 				INNER JOIN sys.availability_groups [ag] ON [s].[group_id] = [ag].[group_id]
 				INNER JOIN sys.databases [db] ON [s].[database_id] = [db].[database_id]
 			WHERE [db].[name] = N'$(DATABASE)'
 				AND [ag].[name] = N'$(AGNAME)'
-				AND [s].[synchronization_state] = 0
+				AND [s].[synchronization_state] <> 0
 				AND [r].[replica_server_name] IN (N'$(PRIMARY)', N'$(SECONDARY1)', N'$(SECONDARY2)'))
 BEGIN
 	BACKUP DATABASE [$(DATABASE)] TO DISK = @path WITH COPY_ONLY, FORMAT, INIT, SKIP, REWIND, NOUNLOAD, COMPRESSION;
@@ -193,14 +193,14 @@ GO
 DECLARE @path NVARCHAR(128);
 SET @path = N'\\' + SUBSTRING('$(PRIMARY)',0,CHARINDEX('\', '$(PRIMARY)')) + N'\$(AGNAME)\$(DATABASE).trn';
 
-IF EXISTS (SELECT * 
+IF NOT EXISTS (SELECT * 
 			FROM sys.dm_hadr_database_replica_states [s]
 				INNER JOIN sys.availability_replicas [r] ON [s].replica_id = [r].[replica_id]
 				INNER JOIN sys.availability_groups [ag] ON [s].[group_id] = [ag].[group_id]
 				INNER JOIN sys.databases [db] ON [s].[database_id] = [db].[database_id]
 			WHERE [db].[name] = N'$(DATABASE)'
 				AND [ag].[name] = N'$(AGNAME)'
-				AND [s].[synchronization_state] = 0
+				AND [s].[synchronization_state] <> 0
 				AND [r].[replica_server_name] IN (N'$(PRIMARY)', N'$(SECONDARY1)', N'$(SECONDARY2)'))
 BEGIN
 	BACKUP LOG [$(DATABASE)] TO DISK = @path WITH NOFORMAT, INIT, NOSKIP, REWIND, NOUNLOAD, COMPRESSION;
