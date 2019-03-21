@@ -197,8 +197,8 @@ IF EXISTS (SELECT *
 				INNER JOIN sys.availability_replicas [r] ON [s].replica_id = [r].[replica_id]
 				INNER JOIN sys.availability_groups [ag] ON [s].[group_id] = [ag].[group_id]
 				INNER JOIN sys.databases [db] ON [s].[database_id] = [db].[database_id]
-			WHERE [db].[name] = N'AGTest'
-				AND [ag].[name] = N'AG-SP-PPTE'
+			WHERE [db].[name] = N'$(DATABASE)'
+				AND [ag].[name] = N'$(AGNAME)'
 				AND [s].[synchronization_state] = 0
 				AND [r].[replica_server_name] IN (N'$(PRIMARY)', N'$(SECONDARY1)', N'$(SECONDARY2)'))
 BEGIN
