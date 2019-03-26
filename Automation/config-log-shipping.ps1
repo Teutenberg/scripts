@@ -159,10 +159,10 @@ Invoke-Command -ComputerName $sComputerName -ScriptBlock {
     }
 }
 
-Invoke-Sqlcmd -ServerInstance $pServerInstance -Database 'master' -Query $pAddBackupTranIgnoreSql -OutputSqlErrors $true
-Invoke-Sqlcmd -ServerInstance $pServerInstance -Database 'master' -Query "ALTER DATABASE [$PrimaryDatabaseName] SET RECOVERY FULL WITH NO_WAIT" -OutputSqlErrors $true
-Invoke-Sqlcmd -ServerInstance $pServerInstance -Database 'master' -Query "BACKUP DATABASE [$PrimaryDatabaseName] TO DISK = N'$pLogShipDir\$PrimaryDatabaseName.bak' WITH NOINIT" -OutputSqlErrors $true
-Invoke-Sqlcmd -ServerInstance $sServerInstance -Database 'master' -Query $sRestoreBackup -OutputSqlErrors $true
-Invoke-Sqlcmd -ServerInstance $pServerInstance -Database 'master' -Query $pSetupLSSql -OutputSqlErrors $true
-Invoke-Sqlcmd -ServerInstance $sServerInstance -Database 'master' -Query $sSetupLSSql -OutputSqlErrors $true
+Invoke-Sqlcmd -ServerInstance $pServerInstance -Database 'master' -Query $pAddBackupTranIgnoreSql -OutputSqlErrors $true -QueryTimeout 600
+Invoke-Sqlcmd -ServerInstance $pServerInstance -Database 'master' -Query "ALTER DATABASE [$PrimaryDatabaseName] SET RECOVERY FULL WITH NO_WAIT" -OutputSqlErrors $true -QueryTimeout 600
+Invoke-Sqlcmd -ServerInstance $pServerInstance -Database 'master' -Query "BACKUP DATABASE [$PrimaryDatabaseName] TO DISK = N'$pLogShipDir\$PrimaryDatabaseName.bak' WITH NOINIT" -OutputSqlErrors $true -QueryTimeout 600
+Invoke-Sqlcmd -ServerInstance $sServerInstance -Database 'master' -Query $sRestoreBackup -OutputSqlErrors $true -QueryTimeout 600
+Invoke-Sqlcmd -ServerInstance $pServerInstance -Database 'master' -Query $pSetupLSSql -OutputSqlErrors $true -QueryTimeout 600
+Invoke-Sqlcmd -ServerInstance $sServerInstance -Database 'master' -Query $sSetupLSSql -OutputSqlErrors $true -QueryTimeout 600
 #endregion
