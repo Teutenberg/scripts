@@ -17,7 +17,7 @@ Param(
     [parameter(Mandatory=$false, HelpMessage='Secondary destination SQL database (Default=PrimaryDatabaseName): "DBNAME"')]
     [ValidateNotNullOrEmpty()]
     [string]
-    $SecondaryDatabaseName = $PrimaryDatabaseName + '_blah',
+    $SecondaryDatabaseName = $PrimaryDatabaseName,
      
     [parameter(Mandatory=$false, HelpMessage='Primary source SMB share path (Default=database backup path): "E:\logshipping"')]
     [ValidateNotNullOrEmpty()]
