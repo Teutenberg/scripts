@@ -55,7 +55,7 @@ $pServerInstance = $pSQLServerObject.Name
 $pComputerName = $pSQLServerObject.ComputerNamePhysicalNetBIOS
 $pInstanceName = $pSQLServerObject.ServiceName
 $pInstanceId = $pSQLServerObject.ServiceInstanceId
-$pDatabaseFiles = $pSQLServerObject.databases[$PrimaryDatabaseName].FileGroups.Files | Select Name, FileName, @{Name='Type';E={'D'}}
+[array]$pDatabaseFiles = $pSQLServerObject.databases[$PrimaryDatabaseName].FileGroups.Files | Select Name, FileName, @{Name='Type';E={'D'}}
 $pDatabaseFiles += $pSQLServerObject.databases[$PrimaryDatabaseName].LogFiles | Select Name, FileName, @{Name='Type';E={'L'}}
 $pLogShipDir = $PrimaryLogshippingDir
 $pShareName = Split-Path $pLogShipDir -Leaf
