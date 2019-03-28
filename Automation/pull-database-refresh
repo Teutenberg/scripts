@@ -1,0 +1,189 @@
+# !!! NOTE: This Script Must be Executed on the Secondary Server Being Refreshed !!!
+
+Param(
+    [parameter(Mandatory=$true, HelpMessage='(Mandatory) Primary source SQL Server: "HOST\INSTANCE"')]
+    [ValidateNotNullOrEmpty()]
+    [string]
+    $PrimaryServerInstance,
+    
+    [parameter(Mandatory=$true, HelpMessage='(Mandatory) Secondary destination SQL Server: "HOST\INSTANCE"')]
+    [ValidateNotNullOrEmpty()]
+    [string]
+    $SecondaryServerInstance,
+
+    [parameter(Mandatory=$true, HelpMessage='(Mandatory) Primary source SQL database: "DBNAME"')]
+    [ValidateNotNullOrEmpty()]
+    [string]
+    $PrimaryDatabaseName,
+
+    [parameter(Mandatory=$false, HelpMessage='Secondary destination SQL database (Default=PrimaryDatabaseName): "DBNAME"')]
+    [ValidateNotNullOrEmpty()]
+    [string]
+    $SecondaryDatabaseName = $PrimaryDatabaseName,
+    
+    [parameter(Mandatory=$false, HelpMessage='Primary source SMB share path (Default=database backup path): "E:\logshipping"')]
+    [ValidateNotNullOrEmpty()]
+    [string]
+    $PrimaryRefreshDir,
+
+    [parameter(Mandatory=$false, HelpMessage='Secondary destination SMB share path (Default=database backup path): "E:\logshipping"')]
+    [ValidateNotNullOrEmpty()]
+    [string]
+    $SecondaryRefreshDir,
+
+    [parameter(Mandatory=$false, HelpMessage='Restore the secondary database to the same directory structure as the primary database (Default=Default database paths): "$true"')]
+    [ValidateNotNullOrEmpty()]
+    [bool]
+    $SecondaryRestoreMatchDir = $true,
+
+    [parameter(Mandatory=$false, HelpMessage='SQL Server sysadmin AD group will be granted permissions to the SMB shares: "domain\groupname"')]
+    [ValidateNotNullOrEmpty()]
+    [string]
+    $SqlSysAdminGroup
+)
+#region: <# AUTO PARAMETERS #>
+[System.Reflection.Assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo");
+$pSQLServerObject = New-Object Microsoft.SqlServer.Management.Smo.Server($PrimaryServerInstance)
+$sSQLServerObject = New-Object Microsoft.SqlServer.Management.Smo.Server($SecondaryServerInstance)
+
+if (!$PrimaryRefreshDir) {
+    $PrimaryRefreshDir = $pSQLServerObject.BackupDirectory
+}
+if (!$SecondaryRefreshDir) {
+    $SecondaryRefreshDir = $sSQLServerObject.BackupDirectory
+}
+
+$pDbName = $PrimaryDatabaseName
+$pServerInstance = $pSQLServerObject.Name
+$pComputerName = $pSQLServerObject.ComputerNamePhysicalNetBIOS
+$pInstanceName = $pSQLServerObject.ServiceName
+$pInstanceId = $pSQLServerObject.ServiceInstanceId
+[array]$pDatabaseFiles = $pSQLServerObject.databases[$pDbName].FileGroups.Files | Select Name, FileName, @{Name='Type';E={'D'}}
+$pDatabaseFiles += $pSQLServerObject.databases[$pDbName].LogFiles | Select Name, FileName, @{Name='Type';E={'L'}}
+$pRefreshDir = $PrimaryRefreshDir
+$pCopySrcUnc = "\\$pComputerName\" + $pRefreshDir.Replace(':\', '$\')
+$pServiceAccountSql = $pSQLServerObject.ServiceAccount
+
+$sDbName = $SecondaryDatabaseName
+$sServerInstance = $sSQLServerObject.Name
+$sComputerName = $sSQLServerObject.ComputerNamePhysicalNetBIOS
+$sInstanceName = $sSQLServerObject.ServiceName
+$sInstanceId = $sSQLServerObject.ServiceInstanceId
+$sRefreshDir = $SecondaryRefreshDir
+
+$sServiceAccountSql = $sSQLServerObject.ServiceAccount
+$sDefaultDataDir = $sSQLServerObject.DefaultFile
+$sDefaultLogDir = $sSQLServerObject.DefaultLog
+$sMoveStr = ''
+
+if ($SecondaryRestoreMatchDir) {
+    $sMoveStr = ($pDatabaseFiles.ForEach({", MOVE '" + $_.Name + "' TO '" + $_.FileName.Replace($pInstanceId,$sInstanceId).Replace($pDbName,$sDbName) + "'"})) -join ''
+} else {
+    $sMoveStr = ($pDatabaseFiles.ForEach({", MOVE '" + $_.Name + "' TO '" + (&{if ($_.Type -eq 'L') {$sDefaultLogDir} else {$sDefaultDataDir}}) + (Split-Path $_.FileName -Leaf).Replace($pDbName,$sDbName) + "'"})) -join ''
+}
+
+$pLastBackupCmd = "SELECT TOP 3 [physical_device_name]
+FROM msdb.dbo.backupset [bs]
+	INNER JOIN msdb.dbo.backupmediafamily [mf]
+		ON [bs].[media_set_id] = [mf].[media_set_id]
+WHERE [type] = 'D' AND [database_name] = N'$pDbName' AND [bs].[backup_finish_date] > DATEADD(DAY, -10, GETDATE())
+ORDER BY [bs].[backup_finish_date] DESC"
+
+$pLastThreeBackupFiles = Invoke-Sqlcmd -ServerInstance $pServerInstance -Database 'master' -Query $pLastBackupCmd
+$pBackupExists = $false
+
+if ($pLastThreeBackupFiles) {
+    foreach ($file in $pLastThreeBackupFiles.physical_device_name) {
+        $FileExists = Invoke-Command -ComputerName $pComputerName -ScriptBlock { Test-Path $Using:file }
+        
+        if ($FileExists) {
+            $pBackupFile = $file
+            $pBackupExists = $true
+            Break;
+        }
+        else {
+            $pBackupFile = "$pRefreshDir\$pDbName.bak"
+        }
+    }
+}
+
+$pNewBackupCmd = "BACKUP DATABASE [$pDbName] TO DISK = N'$pBackupFile' WITH NOINIT, COPY_ONLY"
+$pBackupFilename = (Split-Path $pBackupFile -Leaf)
+
+$sRestoreFile = "$sRefreshDir\$pBackupFilename"
+$sRestoreCmd = "RESTORE DATABASE [$sDbName] FROM DISK = N'$sRestoreFile' WITH REPLACE$sMoveStr"
+$sFixLoginsCmd = "DECLARE @fix_users TABLE ([username] SYSNAME, [sid] VARBINARY(85)); DECLARE @username SYSNAME;
+    INSERT INTO @fix_users EXEC sp_change_users_login 'Report';
+    DECLARE curse CURSOR FAST_FORWARD FOR SELECT [username] FROM @fix_users;
+    OPEN curse; FETCH NEXT FROM curse INTO @username;
+    WHILE (@@FETCH_STATUS=0)
+    BEGIN
+	    EXEC sp_change_users_login 'Auto_Fix', @username; FETCH NEXT FROM curse INTO @username;
+    END
+    CLOSE curse; DEALLOCATE curse;"
+#endregion
+
+#region: main
+if ($sComputerName -inotmatch $env:COMPUTERNAME) {
+    Write-Error "Current host does not match Secondary Server. Aborting!!"
+    Return;
+}
+
+Invoke-Command -ComputerName $pComputerName -ScriptBlock {if (!(Test-Path $Using:pRefreshDir)) { New-Item $Using:pRefreshDir -type directory }}
+if (!(Test-Path $sRefreshDir)) { New-Item $sRefreshDir -type directory }
+
+# Primary make sure service account has access to folder
+Invoke-Command -ComputerName $pComputerName -ScriptBlock {
+    $sam = $Using:SqlSysAdminGroup, $Using:pServiceAccountSql
+    $acl = Get-Acl $Using:pRefreshDir
+    $sam.Where({$_.Length -gt 0}).ForEach({$acl.SetAccessRule($(New-Object system.security.accesscontrol.filesystemaccessrule($_,"FullControl","ContainerInherit,ObjectInherit","None","Allow")))})
+    Set-Acl $Using:pRefreshDir $acl
+}
+
+# Primary backup database to local folder
+if ($pBackupExists) {
+    Write-output "Found existing backup file - $pBackupFile"
+} else {
+    Write-Output "Existing backup file was not found..."
+    Write-Output "Starting database backup..."
+    Invoke-Sqlcmd -ServerInstance $pServerInstance -Database 'master' -Query $pBackupCmd -OutputSqlErrors $true -QueryTimeout 600 -Verbose
+    Write-Output "Completed database backup - $pBackupFile"
+}
+
+# Secondary make sure service account has access to folder
+$sam = $SqlSysAdminGroup, $sServiceAccountSql
+$acl = Get-Acl $sRefreshDir
+$sam.Where({$_.Length -gt 0}).ForEach({$acl.SetAccessRule($(New-Object system.security.accesscontrol.filesystemaccessrule($_,"FullControl","ContainerInherit,ObjectInherit","None","Allow")))})
+Set-Acl $sRefreshDir $acl
+
+# Copy file from Primary to Secondary # Note this executes on the local machine so is more effecient if executed on the Secondary server.
+Write-Output "Starting file copy..."
+$j = Start-Job -ScriptBlock { & ROBOCOPY "$Using:pCopySrcUnc" "$Using:sRefreshDir" "$Using:pBackupFilename" /ETA }
+Start-Sleep -Seconds 5 # Wait for header output
+$j | Receive-Job | Select -First 14
+$jpercent = 0;
+
+do {
+    $jprogress = $j | Receive-Job | Select -Last 1
+    
+    if ($jprogress) {
+        if ($jprogress.Contains('%')) {
+            $jpercent = $jprogress.Substring(0,$jprogress.IndexOf('.'))
+        }
+    }
+
+    Write-Progress -Activity "Copy in Progress" -Status "$jpercent% Complete:" -PercentComplete $jpercent;
+    Start-Sleep -Seconds 1
+
+} while ($j.state -eq "Running")
+
+Write-Output "Completed file copy..."
+
+# Secondary restore database
+Write-Host "Starting database restore..."
+Invoke-Sqlcmd -ServerInstance $sServerInstance -Database 'master' -Query $sRestoreCmd -OutputSqlErrors $true -QueryTimeout 600
+Invoke-Sqlcmd -ServerInstance $sServerInstance -Database 'master' -Query $sFixLoginsCmd -OutputSqlErrors $true -QueryTimeout 600
+Write-Host "Completed database restore..."
+
+# Secondary ## ADD MORE CODE HERE TO CLEAN UP DATABASE ##
+#endregion
