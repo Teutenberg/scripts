@@ -50,12 +50,8 @@ if ($PrimaryHadr.ComputerNamePhysicalNetBIOS -ieq $env:COMPUTERNAME) {
         $SqlJobCmdTemp = "SELECT STUFF([command], CHARINDEX('USER_DATABASES', [command]), 14, 'USER_DATABASES,-$($db.Name)') FROM msdb.dbo.sysjobsteps WHERE [step_name] = N'DatabaseBackup - USER_DATABASES - LOG' AND [step_id] = 1"
         $CmdBau = Invoke-DbaQuery -SqlInstance $SqlPrimary -Query $SqlJobCmdBau -SqlCredential $SqlCred
         $CmdTemp = Invoke-DbaQuery -SqlInstance $SqlPrimary -Query $SqlJobCmdTemp -SqlCredential $SqlCred
-
         Set-DbaAgentJobStep -SqlInstance $SqlPrimary -Job "DatabaseBackup - USER_DATABASES - LOG" -StepName "DatabaseBackup - USER_DATABASES - LOG" -Command $CmdTemp[0] -SqlCredential $SqlCred
 
-        Backup-DbaDatabase -SqlInstance $SqlPrimary -Database $db.Name -BackupDirectory $SqlShareUnc -Type Full -FileCount 4 -CompressBackup
-        Backup-DbaDatabase -SqlInstance $SqlPrimary -Database $db.Name -BackupDirectory $SqlShareUnc -Type Log -CompressBackup
- 
         # Create the availability group on the instance tagged as the primary replica
         #region
         $Params = @{
